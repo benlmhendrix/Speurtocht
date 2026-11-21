@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#17231f">
+<title>Geheime speurtocht</title>
+<style>
+  :root { color-scheme: dark; --bg:#17231f; --panel:#22332d; --muted:#b7c8bf; --accent:#d8f36a; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; background:var(--bg); color:#f5f7f4;
+         font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         display:flex; align-items:center; justify-content:center; padding:22px; }
+  main { width:min(100%,430px); text-align:center; }
+  .eyebrow { color:var(--accent); letter-spacing:.16em; font-size:.76rem; font-weight:700; text-transform:uppercase; }
+  h1 { font-size:2rem; margin:.55rem 0 .35rem; }
+  p { color:var(--muted); line-height:1.5; }
+  .panel { background:var(--panel); border:1px solid #3b5148; border-radius:24px; padding:24px 20px; margin:22px 0; }
+  .arrow-wrap { width:190px; height:190px; margin:14px auto 20px; border:2px solid #52685e;
+                border-radius:50%; display:grid; place-items:center; position:relative;
+                background:radial-gradient(circle,#2d4238,#203129); }
+  .arrow { font-size:6.5rem; color:var(--accent); line-height:1; display:block;
+           transform:rotate(0deg); transition:transform .25s ease; }
+  .north { position:absolute; top:9px; color:var(--muted); font-size:.72rem; font-weight:700; }
+  .distance { font-size:2.5rem; font-weight:750; letter-spacing:-.04em; }
+  .hint { font-size:.92rem; min-height:2.8em; }
+  button { width:100%; border:0; border-radius:14px; padding:16px 18px; margin-top:10px;
+           background:var(--accent); color:#17231f; font-size:1rem; font-weight:750; cursor:pointer; }
+  button.secondary { background:#354a40; color:#fff; border:1px solid #60776b; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  #status { min-height:1.5em; font-size:.9rem; color:var(--muted); }
+  .small { font-size:.78rem; color:#91a69a; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Geheime missie · Amsterdam</div>
+  <h1 id="title">De speurtocht</h1>
+  <p id="intro">Volg de pijl. Er verschijnt geen kaart en de bestemming blijft geheim.</p>
+
+  <section class="panel" id="navigation">
+    <div class="eyebrow" id="step">Klaar voor vertrek?</div>
+    <div class="arrow-wrap"><span class="north">N</span><span class="arrow" id="arrow">↑</span></div>
+    <div class="distance" id="distance">—</div>
+    <p class="hint" id="hint">Zet je locatie aan en geef toestemming om te beginnen.</p>
+    <p id="status" role="status">Je locatie wordt alleen gebruikt om de richting en afstand te berekenen.</p>
+    <button id="start">Start speurtocht</button>
+    <button id="next" class="secondary hidden" disabled>Volgende bestemming</button>
+  </section>
+  <p class="small">Tip: houd je telefoon plat en beweeg een stukje als de richting niet direct goed werkt. Locatietoegang is nodig.</p>
+</main>
+<script>
+(() => {
+  // Bestemmingen staan bewust niet in de interface.
+  const stops = [
+    {lat:52.3555163, lon:4.8908133},
+    {lat:52.3443976, lon:4.8914574},
+    {lat:52.3358445, lon:4.8737444},
+    {lat:52.3567627, lon:4.8910138}
+  ];
+  let index = 0, watchId = null, heading = null, current = null, started = false;
+  const $ = id => document.getElementById(id);
+  const rad = d => d * Math.PI / 180;
+  const deg = r => (r * 180 / Math.PI + 360) % 360;
+  function distance(a,b) {
+    const R=6371000, dLat=rad(b.lat-a.lat), dLon=rad(b.lon-a.lon);
+    const x=Math.sin(dLat/2)**2 + Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLon/2)**2;
+    return 2*R*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+  }
+  function bearing(a,b) {
+    const p1=rad(a.lat), p2=rad(b.lat), dl=rad(b.lon-a.lon);
+    return deg(Math.atan2(Math.sin(dl)*Math.cos(p2),
+      Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl)));
+  }
+  function render() {
+    if (!current || !started) return;
+    const target=stops[index], d=distance(current,target), b=bearing(current,target);
+    $("distance").textContent = d < 1000 ? Math.round(d)+" meter" : (d/1000).toFixed(2).replace(".",",")+" km";
+    $("step").textContent = `Bestemming ${index+1} van ${stops.length}`;
+    $("hint").textContent = d <= 60 ? "Je bent er bijna! Zoek de plek om je heen." :
+      (heading === null ? `Richting ${Math.round(b)}° vanaf het noorden. Richt je telefoon naar het noorden.` : "Volg de pijl naar je volgende bestemming.");
+    $("arrow").style.transform = `rotate(${heading === null ? b : ((b-heading+540)%360-180)}deg)`;
+    $("next").disabled = d > 60;
+    $("next").textContent = index === stops.length-1 ? "Rond de speurtocht af" : "Volgende bestemming";
+  }
+  function onOrientation(e) {
+    if (typeof e.webkitCompassHeading === "number") heading=e.webkitCompassHeading;
+    else if (e.absolute && typeof e.alpha === "number") heading=(360-e.alpha)%360;
+    if (current) render();
+  }
+  async function requestCompass() {
+    try {
+      if (typeof DeviceOrientationEvent !== "undefined" &&
+          typeof DeviceOrientationEvent.requestPermission === "function") {
+        const result=await DeviceOrientationEvent.requestPermission();
+        if (result === "granted") window.addEventListener("deviceorientation",onOrientation,true);
+      } else {
+        window.addEventListener("deviceorientationabsolute",onOrientation,true);
+        window.addEventListener("deviceorientation",onOrientation,true);
+      }
+    } catch (_) {}
+  }
+  function locate() {
+    if (!navigator.geolocation) { $("status").textContent="Je browser ondersteunt geen GPS-locatie."; return; }
+    watchId=navigator.geolocation.watchPosition(pos => {
+      current={lat:pos.coords.latitude,lon:pos.coords.longitude};
+      $("status").textContent="GPS actief · nauwkeurigheid ongeveer "+Math.round(pos.coords.accuracy)+" meter";
+      render();
+    }, err => {
+      $("status").textContent = err.code===1 ? "Locatietoegang geweigerd. Geef deze website toestemming in je browserinstellingen." : "Locatie niet gevonden. Controleer GPS en probeer opnieuw.";
+    }, {enableHighAccuracy:true, maximumAge:2000, timeout:15000});
+  }
+  $("start").addEventListener("click", async () => {
+    started=true;
+    $("start").classList.add("hidden");
+    $("intro").textContent="Bestemming verborgen. Volg de pijl en houd je telefoon plat.";
+    await requestCompass();
+    locate();
+  });
+  $("next").addEventListener("click", () => {
+    if ($("next").disabled) return;
+    if (index===stops.length-1) {
+      if (watchId!==null) navigator.geolocation.clearWatch(watchId);
+      $("title").textContent="Missie volbracht!";
+      $("intro").textContent="Alle geheime bestemmingen gevonden. Goed gedaan!";
+      $("navigation").classList.add("hidden");
+      return;
+    }
+    index++;
+    $("next").disabled=true;
+    render();
+  });
+})();
+</script>
+</body>
+</html>
